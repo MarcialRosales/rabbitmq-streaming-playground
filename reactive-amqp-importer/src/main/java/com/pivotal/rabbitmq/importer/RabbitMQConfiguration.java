@@ -11,10 +11,20 @@ import reactor.rabbitmq.*;
 
 import javax.annotation.PreDestroy;
 
+/**
+ * Spring Cloud Stream
+ * ------------------
+ * Spring Integration
+ * ------------------
+ * Spring AMQP                 demo
+ * ------------------ ----------------------------
+ * Java AMQP library | Java Reactive AMPQ library |
+ *
+ */
 @Configuration
 public class RabbitMQConfiguration {
 
-    @Bean()
+    @Bean
     Mono<Connection> connection(RabbitProperties rabbitProperties) {
         ConnectionFactory connectionFactory = new ConnectionFactory();
         connectionFactory.setHost(rabbitProperties.getHost());
@@ -28,11 +38,6 @@ public class RabbitMQConfiguration {
     @Bean
     Sender sender(Mono<Connection> connectionMono) {
         return RabbitFlux.createSender(new SenderOptions().connectionMono(connectionMono));
-    }
-
-    @Bean
-    Receiver receiver(Mono<Connection> connectionMono) {
-        return RabbitFlux.createReceiver(new ReceiverOptions().connectionMono(connectionMono));
     }
 
     @Autowired
