@@ -1,0 +1,5 @@
+file-sender:
+  queue: my-queue
+  exchange:
+  routing-key: my-queue
+  filename: src/main/resources/wordcount.txt
