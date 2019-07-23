@@ -68,7 +68,7 @@ class Runner implements CommandLineRunner {
     public void run(String... args) throws Exception {
         Mono<AMQP.Queue.DeclareOk> queueDeclaration = sender.declareQueue(QueueSpecification.queue());
         queueDeclaration.subscribe(this::sendAndReceiveToFrom, this::reportError);
-        latch.await(5, TimeUnit.SECONDS);
+        latch.await(15, TimeUnit.SECONDS);
     }
 
     private void sendAndReceiveToFrom(AMQP.Queue.DeclareOk declaredQueue) {
