@@ -29,6 +29,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.rabbitmq.*;
 
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -62,17 +63,19 @@ class IntegerSender implements CommandLineRunner {
     private final Sender sender;
     private final ResourceDeclaration resourceDeclaration;
     private int count;
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(IntegerSender.class);
 
     public IntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
         this.sender = sender;
         this.resourceDeclaration = resourceDeclaration;
         this.count = count;
     }
+
     public void run(String ... args) {
         resourceDeclaration.declareResources()
                 .then(send(integers(count)))
-                .subscribe();
+                .block();
+
     }
 
     private Mono send(Flux<Integer> integers) {
@@ -110,6 +113,7 @@ class IntegerReceiver implements CommandLineRunner {
     public void run(String ... args ) throws InterruptedException {
         resourceDeclaration.declareResources()
                 .thenMany(receiveIntegers())
+                //.take(allMessagesReceived.getCount())
                 .subscribe(m -> {
                     LOGGER.info("Received message {}", new String(m.getBody()));
                     allMessagesReceived.countDown();
@@ -127,6 +131,7 @@ class IntegerReceiver implements CommandLineRunner {
 
 class ResourceDeclaration {
     private final Sender sender;
+    private static final Logger LOGGER = LoggerFactory.getLogger(ResourceDeclaration.class);
 
     public ResourceDeclaration(Sender sender) {
         this.sender = sender;
@@ -142,7 +147,9 @@ class ResourceDeclaration {
         return sender
                 .declareExchange(exchange())
                 .then(sender.declareQueue(queue()))
-                .then(sender.bind(queueWithExchange()));
+                .then(sender.bind(queueWithExchange()))
+                .doOnNext(bindOk -> {LOGGER.info("Resources are available");});
+                //.cache();
     }
     private ExchangeSpecification exchange() {
         return ExchangeSpecification.exchange(exchangeName()); // default is direct
