@@ -72,7 +72,7 @@ class IntegerSender implements CommandLineRunner {
     }
 
     public void run(String ... args) {
-        resourceDeclaration.declareResources()
+        resourceDeclaration.declare()
                 .then(send(integers(count)))
                 .block();
 
@@ -111,7 +111,7 @@ class IntegerReceiver implements CommandLineRunner {
     }
 
     public void run(String ... args ) throws InterruptedException {
-        resourceDeclaration.declareResources()
+        resourceDeclaration.declare()
                 .thenMany(receiveIntegers())
                 //.take(allMessagesReceived.getCount())
                 .subscribe(m -> {
@@ -132,9 +132,11 @@ class IntegerReceiver implements CommandLineRunner {
 class ResourceDeclaration {
     private final Sender sender;
     private static final Logger LOGGER = LoggerFactory.getLogger(ResourceDeclaration.class);
+    private final Mono<AMQP.Queue.BindOk> resourceDeclaration;
 
     public ResourceDeclaration(Sender sender) {
         this.sender = sender;
+        this.resourceDeclaration = declareResources();
     }
     public String exchangeName() {
         return "integers";
@@ -143,13 +145,17 @@ class ResourceDeclaration {
         return "integers";
     }
 
-    public Mono<AMQP.Queue.BindOk> declareResources() {
+    public Mono<AMQP.Queue.BindOk> declare() {
+        return resourceDeclaration;
+    }
+
+    private Mono<AMQP.Queue.BindOk> declareResources() {
         return sender
                 .declareExchange(exchange())
                 .then(sender.declareQueue(queue()))
                 .then(sender.bind(queueWithExchange()))
-                .doOnNext(bindOk -> {LOGGER.info("Resources are available");});
-                //.cache();
+                .doOnNext(bindOk -> {LOGGER.info("Resources are available");})
+                .cache(); // comment out this line to see resources are declared twice
     }
     private ExchangeSpecification exchange() {
         return ExchangeSpecification.exchange(exchangeName()); // default is direct
