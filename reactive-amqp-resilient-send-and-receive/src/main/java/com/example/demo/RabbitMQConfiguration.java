@@ -30,11 +30,10 @@ public class RabbitMQConfiguration {
         return Retry.any()
                 .randomBackoff(retryProperties.randomBackoff.firstBackoff, retryProperties.randomBackoff.maxBackoff)
                 .doOnRetry(context -> {
-                    LOGGER.error("Failed attempt %d due to [%s]\n",
+                    LOGGER.error("Failed attempt {} due to {} [backoff:{}ms]",
                             context.iteration(),
                             context.exception().getMessage(),
-                            context.backoff().toMillis(),
-                            context.applicationContext());
+                            context.backoff().toMillis());
                 })
                 .timeout(retryProperties.timeout)
                 .retryMax(retryProperties.retryMax);
