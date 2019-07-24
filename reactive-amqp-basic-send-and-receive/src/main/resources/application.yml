@@ -1,4 +1,3 @@
 logging.level.root: INFO
 
-spring.rabbitmq.connection.retry:
 

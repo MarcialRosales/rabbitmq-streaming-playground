@@ -49,7 +49,7 @@ public class RabbitMQConfiguration {
 
         return Mono.fromCallable(() -> connectionFactory.newConnection())
                 .retryWhen(retryPolicy)
-                .doOnNext(v -> System.out.printf("Connection established with %s\n ", v))
+                .doOnNext(v -> LOGGER.info("Connection established with {}", v))
                 .cache();
     }
 

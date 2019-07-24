@@ -24,7 +24,6 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.rabbitmq.OutboundMessage;
 import reactor.rabbitmq.QueueSpecification;
 import reactor.rabbitmq.Receiver;
@@ -32,7 +31,6 @@ import reactor.rabbitmq.Sender;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @SpringBootApplication
 public class SpringBootSample {
@@ -55,41 +53,47 @@ class Runner implements CommandLineRunner {
     private final Sender sender;
     private final Receiver receiver;
     private final int messageCount;
-    CountDownLatch latch;
+    CountDownLatch allMessagesReceived;
 
     Runner(Sender sender, Receiver receiver, int messageCount) {
         this.sender = sender;
         this.receiver = receiver;
         this.messageCount = messageCount;
-        latch = new CountDownLatch(messageCount);
+        allMessagesReceived = new CountDownLatch(messageCount);
     }
 
     @Override
     public void run(String... args) throws Exception {
-        Mono<AMQP.Queue.DeclareOk> queueDeclaration = sender.declareQueue(QueueSpecification.queue());
-        queueDeclaration.subscribe(this::sendAndReceiveToFrom, this::reportError);
-        latch.await(15, TimeUnit.SECONDS);
+
+        sender.declareQueue(QueueSpecification.queue())
+                .subscribe(this::sendAndReceive, this::reportError);
+
+        allMessagesReceived.await(15, TimeUnit.SECONDS);
     }
 
-    private void sendAndReceiveToFrom(AMQP.Queue.DeclareOk declaredQueue) {
-        sendMessagesTo(declaredQueue);
-        receiveAllMessagesFrom(declaredQueue);
+    private void sendAndReceive(AMQP.Queue.DeclareOk declaredQueue) {
+        sendTo(tenIntegers(), declaredQueue);
+        receiveFrom(declaredQueue);
     }
     private void reportError(Throwable error) {
-        LOGGER.error("failed to declare queue", error);
+        LOGGER.error("An error occurred", error);
     }
 
-    private void receiveAllMessagesFrom(AMQP.Queue.DeclareOk queue) {
-        receiver.consumeNoAck(queue.getQueue()).subscribe(m -> {
-            LOGGER.info("Received message {}", new String(m.getBody()));
-            latch.countDown();
-        });
+    private void receiveFrom(AMQP.Queue.DeclareOk queue) {
+        receiver.consumeNoAck(queue.getQueue())
+                .subscribe(m -> {
+                    LOGGER.info("Received message {}", new String(m.getBody()));
+                    allMessagesReceived.countDown();
+                });
     }
 
-    private void sendMessagesTo(AMQP.Queue.DeclareOk queue) {
+    private void sendTo(Flux<Integer> integers, AMQP.Queue.DeclareOk queue) {
         sender.send(
-                Flux.range(1, messageCount).map(i -> toAmqpMessage(i, queue.getQueue()))
+                integers.map(i -> toAmqpMessage(i, queue.getQueue()))
         ).subscribe();
+    }
+    private Flux<Integer> tenIntegers() {
+        return Flux.range(1, messageCount);
     }
 
     private OutboundMessage toAmqpMessage(int index, String queue) {
