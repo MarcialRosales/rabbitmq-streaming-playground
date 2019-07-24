@@ -213,9 +213,59 @@ public class SpringBootSampleTest {
     }
 
     @Test
-    public void testrepeatWhenEmpty() {
-        // https://projectreactor.io/docs/core/3.2.9.RELEASE/api/reactor/core/publisher/Mono.html#repeatWhenEmpty-java.util.function.Function-
+    public void anErrorTerminatesStreamByDefault() throws InterruptedException {
+        final AtomicInteger counter = new AtomicInteger(0);
 
+        Flux<String> flux =
+                Flux.interval(Duration.ofMillis(250))
+                        .map(input -> {
+                            if (input < 3) { counter.incrementAndGet(); return "tick " + input; };
+                            throw new RuntimeException("boom");
+                        })
+                        .onErrorReturn("Uh oh")
+                .take(5);
+
+        flux.subscribe(System.out::println);
+        Thread.sleep(2100);
+        assertEquals(3, counter.get());
+    }
+    @Test
+    public void anErrorTerminatesStreamUnlessWeHandleIt() throws InterruptedException {
+        final AtomicInteger counter = new AtomicInteger(0);
+
+        Flux<String> flux =
+                Flux.interval(Duration.ofMillis(250))
+                        .map(input -> {
+                            if (input < 3) { counter.incrementAndGet(); return "tick " + input; };
+                            throw new RuntimeException("boom");
+                        })
+                        .onErrorReturn("Uh oh")
+                        .take(5);
+
+        flux.subscribe(System.out::println);
+        Thread.sleep(2100);
+        assertEquals(3, counter.get());
+    }
+
+
+    @Test
+    public void retryAlwaysResubscribeStreamWhenErrorOccurs() throws InterruptedException {
+        Flux
+                .interval(Duration.ofMillis(250))
+                .log()
+                .doOnNext(i -> { if ((i+1) % 3 == 0) throw new RuntimeException(); } )
+                .subscribe(System.out::println, System.err::println);
+
+        Thread.sleep(250*5);
+
+        Flux
+                .interval(Duration.ofMillis(250))
+                .log()
+                .doOnNext(i -> { if ((i+1) % 3 == 0) throw new RuntimeException(); } )
+                .retry(1)
+                .subscribe(System.out::println, System.err::println);
+
+        Thread.sleep(250*5);
     }
 
 
