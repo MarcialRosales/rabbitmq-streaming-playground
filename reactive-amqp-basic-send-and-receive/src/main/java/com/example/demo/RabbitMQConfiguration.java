@@ -2,8 +2,12 @@ package com.example.demo;
 
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.amqp.RabbitProperties;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import reactor.core.publisher.Mono;
@@ -14,21 +18,25 @@ import javax.annotation.PreDestroy;
 import java.time.Duration;
 
 @Configuration
+@EnableConfigurationProperties({ConnectionRetryPolicyProperties.class})
 public class RabbitMQConfiguration {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(RabbitMQConfiguration.class);
+
+
     @Bean
-    Retry retryPolicy() {
+    Retry retryPolicy(ConnectionRetryPolicyProperties retryProperties) {
         return Retry.any()
-                .randomBackoff(Duration.ofMillis(100), Duration.ofSeconds(2))
+                .randomBackoff(retryProperties.randomBackoff.firstBackoff, retryProperties.randomBackoff.maxBackoff)
                 .doOnRetry(context -> {
-                    System.out.printf("Failed attempt %d due to [%s]\n",
+                    LOGGER.error("Failed attempt %d due to [%s]\n",
                             context.iteration(),
                             context.exception().getMessage(),
                             context.backoff().toMillis(),
                             context.applicationContext());
                 })
-                .timeout(Duration.ofSeconds(60))
-                .retryMax(10);
+                .timeout(retryProperties.timeout)
+                .retryMax(retryProperties.retryMax);
     }
 
     @Bean()
@@ -41,7 +49,7 @@ public class RabbitMQConfiguration {
 
         return Mono.fromCallable(() -> connectionFactory.newConnection())
                 .retryWhen(retryPolicy)
-                .doOnNext(v -> System.out.printf("Finally Received %s\n ", v))
+                .doOnNext(v -> System.out.printf("Connection established with %s\n ", v))
                 .cache();
     }
 
@@ -63,4 +71,50 @@ public class RabbitMQConfiguration {
         connection.block().close();
     }
 
+}
+@ConfigurationProperties(prefix = "spring.rabbitmq.connection")
+class ConnectionRetryPolicyProperties {
+
+    long retryMax = 10;
+    Duration timeout = Duration.ofMillis(60000);
+
+    RandomBackoffProperties randomBackoff = new RandomBackoffProperties();
+
+    public long getRetryMax() {
+        return retryMax;
+    }
+
+    public void setRetryMax(long retryMax) {
+        this.retryMax = retryMax;
+    }
+
+    public long getTimeoutMs() {
+        return timeout.toMillis();
+    }
+
+    public void setTimeoutMs(long timeoutMs) {
+        this.timeout = Duration.ofMillis(timeoutMs);
+    }
+
+
+}
+class RandomBackoffProperties {
+    Duration firstBackoff = Duration.ofMillis(1000);
+    Duration maxBackoff = Duration.ofMillis(10000);;
+
+    public long getFirstBackoffMs() {
+        return firstBackoff.toMillis();
+    }
+
+    public void setFirstBackoffMs(long firstBackoffMs) {
+        this.firstBackoff = Duration.ofMillis(firstBackoffMs);
+    }
+
+    public long getMaxBackoffMs() {
+        return maxBackoff.toMillis();
+    }
+
+    public void setMaxBackoff(long maxBackoffMs) {
+        this.maxBackoff = Duration.ofMillis(maxBackoffMs);
+    }
 }
