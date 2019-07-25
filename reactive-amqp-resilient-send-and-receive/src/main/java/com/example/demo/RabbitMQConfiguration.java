@@ -26,7 +26,7 @@ public class RabbitMQConfiguration {
     private static final Logger LOGGER = LoggerFactory.getLogger(RabbitMQConfiguration.class);
 
     @Bean
-    Retry retryPolicy(ConnectionRetryPolicyProperties retryProperties) {
+    Retry<?> retryPolicy(ConnectionRetryPolicyProperties retryProperties) {
         return Retry.any()
                 .randomBackoff(retryProperties.randomBackoff.firstBackoff, retryProperties.randomBackoff.maxBackoff)
                 .doOnRetry(context -> {
@@ -46,25 +46,27 @@ public class RabbitMQConfiguration {
         connectionFactory.setPort(rabbitProperties.getPort());
         connectionFactory.setUsername(rabbitProperties.getUsername());
         connectionFactory.setPassword(rabbitProperties.getPassword());
-        connectionFactory.useNio();
+        connectionFactory.useNio();     // is this really necessary? I think it is automatically enabled
 
         return connectionFactory;
     }
     @Bean("senderConnection")
-    Mono<Connection> senderConnection(ConnectionFactory connectionFactory, Retry retryPolicy) {
-        return Mono.fromCallable(() -> connectionFactory.newConnection("sender"))
-                .retryWhen(retryPolicy)
-                .doOnNext(v -> LOGGER.info("Sender Connection established with {}", v))
-                .cache();
+    Mono<Connection> senderConnection(ConnectionFactory connectionFactory, Retry<?> retryPolicy) {
+        return buildNamedConnection(connectionFactory, retryPolicy, "sender");
     }
 
     @Bean("receiverConnection")
-    Mono<Connection> receiverConnection(ConnectionFactory connectionFactory, Retry retryPolicy) {
-        return Mono.fromCallable(() -> connectionFactory.newConnection("receiver"))
-                .retryWhen(retryPolicy)
-                .doOnNext(v -> LOGGER.info("Receiver Connection established with {}", v))
-                .cache();
+    Mono<Connection> receiverConnection(ConnectionFactory connectionFactory, Retry<?> retryPolicy) {
+        return buildNamedConnection(connectionFactory, retryPolicy, "receiver");
     }
+
+    private Mono<Connection> buildNamedConnection(ConnectionFactory connectionFactory, Retry<?> retryPolicy, String name) {
+        return Mono.fromCallable(() -> connectionFactory.newConnection(name))
+                .retryWhen(retryPolicy)
+                .doOnNext(conn -> LOGGER.info("{} Connection established with {}", name, conn))
+                .cache(); // when we create the Mono<Connection>, RabbitMQ Reactive client does not automatically cache  it hence we do it.
+    }
+
 
     @Bean
     Sender sender(@Qualifier("senderConnection") Mono<Connection> connectionMono) {
@@ -84,6 +86,8 @@ public class RabbitMQConfiguration {
     @PreDestroy
     public void closeSender() throws Exception {
         senderConnection.block().close();
+        // when we create the Mono<Connection>, RabbitMQ Reactive client does not automatically close the connection
+        // when we close Sender/Receiver. We have to do it.
     }
     @PreDestroy
     public void closeReceiver() throws Exception {
