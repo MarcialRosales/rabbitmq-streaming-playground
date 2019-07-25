@@ -75,7 +75,7 @@ class IntegerSender implements CommandLineRunner {
         resourceDeclaration.declare()
                 .then(send(integers(count)))
                 .block();
-
+        LOGGER.info("Finished sending integers");
     }
 
     private Mono send(Flux<Integer> integers) {
@@ -113,7 +113,7 @@ class IntegerReceiver implements CommandLineRunner {
     public void run(String ... args ) throws InterruptedException {
         resourceDeclaration.declare()
                 .thenMany(receiveIntegers())
-                //.take(allMessagesReceived.getCount())
+                //.take(allMessagesReceived.getCount())  we either use the take operator or call waitForAllMessages()
                 .subscribe(m -> {
                     LOGGER.info("Received message {}", new String(m.getBody()));
                     allMessagesReceived.countDown();
@@ -151,20 +151,14 @@ class ResourceDeclaration {
 
     private Mono<AMQP.Queue.BindOk> declareResources() {
         return sender
-                .declareExchange(exchange())
-                .then(sender.declareQueue(queue()))
+                .declareExchange(ResourcesSpecification.exchange(exchangeName()))
+                .then(sender.declareQueue(ResourcesSpecification.queue("integers")))
                 .then(sender.bind(queueWithExchange()))
                 .doOnNext(bindOk -> {LOGGER.info("Resources are available");})
-                .cache(); // comment out this line to see resources are declared twice
-    }
-    private ExchangeSpecification exchange() {
-        return ExchangeSpecification.exchange(exchangeName()); // default is direct
-    }
-    private QueueSpecification queue() {
-        return QueueSpecification.queue("integers");
+                .cache(); // comment out this line to see resources are declared twice. we don't want that.
     }
     private BindingSpecification queueWithExchange
             () {
-        return BindingSpecification.binding("integers", queueName(), queueName());
+        return ResourcesSpecification.binding("integers", queueName(), queueName());
     }
 }
