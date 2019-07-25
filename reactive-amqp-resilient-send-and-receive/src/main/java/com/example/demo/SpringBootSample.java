@@ -47,45 +47,162 @@ public class SpringBootSample {
     ResourceDeclaration resourceDeclaration(Sender sender) {
         return new ResourceDeclaration(sender);
     }
-    @Bean
+    //@Bean
     CommandLineRunner integerSender(Sender sender, ResourceDeclaration resourceDeclaration) {
         return new IntegerSender(sender, resourceDeclaration, messageCount);
+    }
+    //@Bean
+    CommandLineRunner resilientIntegerSender(Sender sender, ResourceDeclaration resourceDeclaration) {
+        return new ResilientIntegerSender(sender, resourceDeclaration, messageCount);
+    }
+    @Bean
+    CommandLineRunner resilientIntegerSender_SendingUnroutableMessage(Sender sender, ResourceDeclaration resourceDeclaration) {
+        return new ResilientIntegerSender_SendingUnroutableMessage(sender, resourceDeclaration, messageCount);
+    }
+
+
+    //@Bean
+    CommandLineRunner integerSenderUsingUnknownExchange(Sender sender, ResourceDeclaration resourceDeclaration) {
+        return new IntegerSenderUsingUnknownExchange(sender, resourceDeclaration, messageCount);
     }
     @Bean
     CommandLineRunner integerReceiver(Receiver receiver, ResourceDeclaration resourceDeclaration) {
         return new IntegerReceiver(receiver, resourceDeclaration, messageCount);
     }
 
+
 }
 
+/**
+ * Messages are sent without no exceptions however RabbitMq server rejects the first message asynchronously and when
+ * the RabbitMQ client receives the response, it closes the channel. So we will see the channelclosehandler being invoked.
+ * That's it. All our messages have been lost.
+ *
+ * How do we deal with it ?
+ *
+ * Only in case of IOExceptions (i.e. connectivity problems), the send operation throws an exception. The default exception handler
+ * provided by SendOptions retries.
+ *
+ */
+class IntegerSenderUsingUnknownExchange extends IntegerSender {
 
+    public IntegerSenderUsingUnknownExchange(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
+        super(sender, resourceDeclaration, count);
+    }
+
+    @Override
+    protected OutboundMessage toAmqpMessage(int index) {
+        if (index > 2) {
+            return new OutboundMessage("unknown-exchange", resourceDeclaration.queueName(), ("Message_" + index).getBytes());
+        }else {
+            return super.toAmqpMessage(index);
+        }
+    }
+}
+
+/**
+ * Uses publisher confirmation and mandatory flag (SendOptions.trackReturned) to send messages.
+ *
+ */
+class ResilientIntegerSender extends IntegerSender {
+    public ResilientIntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
+        super(sender, resourceDeclaration, count);
+        sendOptions.trackReturned(true);
+    }
+    public void run(String ... args) {
+        resourceDeclaration.declare()
+                .thenMany(sendWithConfirmations(integers(count)))
+                .doOnError(System.err::println)
+                .subscribe(m->{
+                    if (m.isReturned()) {
+                        System.err.println("Message returned back  "+new String(m.getOutboundMessage().getBody()));
+                    }else {
+                        if (m.isAck()) {
+                            System.out.println("Sent successfully message " + new String(m.getOutboundMessage().getBody()));
+                        } else {
+                            System.err.println("Message nacked " + new String(m.getOutboundMessage().getBody()));
+                        }
+                    }
+                });
+
+        LOGGER.info("Finished sending integers");
+    }
+    protected Flux<OutboundMessageResult> sendWithConfirmations(Flux<Integer> integers) {
+        return sender.sendWithPublishConfirms(integers.map(this::toAmqpMessage), sendOptions);
+    }
+
+}
+
+/**
+ * When a message can be routed, the broker returns the message.
+ *
+ * What options do we have as a sender/producer ?
+ *  - if we are in control of creating the queue then we can try bind it and retry
+ *  - if we are not in control of queue/bindings then we either
+ *      - don't use mandatory flag and rely on Alternate exchanges (outsource the solution)
+ *      - send the message to another exchange-queue pair under our control (too much work, instead use AE)
+ *      - report the problem (log, hospital-queue, fail back to originator if possible)
+ *
+ */
+class ResilientIntegerSender_SendingUnroutableMessage extends ResilientIntegerSender {
+    public ResilientIntegerSender_SendingUnroutableMessage(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
+        super(sender, resourceDeclaration, count);
+    }
+    @Override
+    protected OutboundMessage toAmqpMessage(int index) {
+        if (index > 2) {
+            // amq.direct exists but there should not be any bindings
+            return new OutboundMessage("amq.direct", resourceDeclaration.queueName(), ("Message_" + index).getBytes());
+        }else {
+            return super.toAmqpMessage(index);
+        }
+    }
+
+}
+
+/**
+ * Uses plain basic.publish AMQP primitive. i.e. fire and forget.
+ *
+ * Only in case of IOExceptions (i.e. connectivity problems), the send operation throws an exception. The default exception handler
+ * provided by SendOptions retries the operation.
+ *
+ * But what about other situations like returned or nacked messages ?
+ *
+ * The Mono returned from send() will complete after the flux of integers completes. All integers will be sent using the same
+ * newly created Channel. It is ok if we dont overdo it otherwise we want to have a pool of channels and reuse them.
+ *
+ */
 class IntegerSender implements CommandLineRunner {
-    private final Sender sender;
-    private final ResourceDeclaration resourceDeclaration;
-    private int count;
-    private static final Logger LOGGER = LoggerFactory.getLogger(IntegerSender.class);
+    final Sender sender;
+    final ResourceDeclaration resourceDeclaration;
+    int count;
+    static final Logger LOGGER = LoggerFactory.getLogger(IntegerSender.class);
+    final SendOptions sendOptions;
 
     public IntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
         this.sender = sender;
         this.resourceDeclaration = resourceDeclaration;
         this.count = count;
+        this.sendOptions = new SendOptions();
     }
 
     public void run(String ... args) {
         resourceDeclaration.declare()
                 .then(send(integers(count)))
+                .doOnError(System.err::println)
                 .block();
         LOGGER.info("Finished sending integers");
     }
 
-    private Mono send(Flux<Integer> integers) {
-        return sender.send(integers.map(this::toAmqpMessage));
+    protected Mono send(Flux<Integer> integers) {
+        return sender.send(integers.map(this::toAmqpMessage), sendOptions);
     }
 
-    private Flux<Integer> integers(final int count) {
+    protected Flux<Integer> integers(final int count) {
         return Flux.range(1, count);
     }
-        private OutboundMessage toAmqpMessage(int index) {
+
+    protected OutboundMessage toAmqpMessage(int index) {
         return new OutboundMessage(resourceDeclaration.exchangeName(), resourceDeclaration.queueName(), ("Message_" + index).getBytes());
     }
 
