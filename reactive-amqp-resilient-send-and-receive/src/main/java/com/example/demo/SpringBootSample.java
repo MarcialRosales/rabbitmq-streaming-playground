@@ -38,6 +38,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /**
  *
@@ -65,29 +66,6 @@ public class SpringBootSample {
     @Autowired
     ChaosMonkey chaosMonkey;
 
-    class ChaosMonkey {
-        ReactorNettyClient http;
-
-        ChaosMonkey(ReactorNettyClient http) {
-            this.http = http;
-        }
-
-        void closeConnectionAfter(Mono<Connection> connection, Duration after) {
-            connection.delaySubscription(after)
-                    .flatMapMany(conn -> http.getConnections()
-                            .filter( connectionInfo -> conn.getClientProvidedName().equals(connectionInfo.getClientProperties().getConnectionName()))
-                            .map(connectionInfo -> connectionInfo.getName())
-                            .zipWith(connection.map(connection1 -> connection1.getClientProvidedName()))
-                    .flatMap(tuple ->
-                            {
-                                System.err.printf("Closing %s connection %s \n", tuple.getT2(), tuple.getT1());
-                                return http.closeConnection(tuple.getT1());
-                            })
-                    ).subscribe();
-        }
-    }
-
-
     @Bean
     CommandLineRunner simulateConnectionFailureWhenUsingPublisherConfirm(Sender sender, Receiver receiver, ResourceDeclaration resourceDeclaration,
         @Qualifier("senderConnection") Mono<Connection> senderConnection, //
@@ -97,8 +75,8 @@ public class SpringBootSample {
         return args -> {
 
             // Simulate closing both connections
-            chaosMonkey.closeConnectionAfter(senderConnection, Duration.ofSeconds(5));
-            chaosMonkey.closeConnectionAfter(receiverConnection, Duration.ofSeconds(15));
+            //chaosMonkey.closeConnectionAfter(senderConnection, Duration.ofSeconds(2));
+            chaosMonkey.closeConnectionAfter(receiverConnection, Duration.ofSeconds(5));
 
             CountDownLatch senderAndReceiverCompleted = new CountDownLatch(2);
             ResilientIntegerSender theSender = new ResilientIntegerSender(sender, resourceDeclaration, messageCount, senderAndReceiverCompleted);
@@ -355,10 +333,16 @@ class IntegerReceiver implements CommandLineRunner {
                 .doOnTerminate(countDownWhenTerminate::countDown)
                 .delayElements(Duration.ofMillis(200))
                 .subscribe(m -> {
-                    receivedMessageCount.incrementAndGet();
-                    LOGGER.info("Received message {}", new String(m.getBody()));
+                    long receivedSoFar = receivedMessageCount.incrementAndGet();
+                    LOGGER.info("Received message {}/{} [messageId:{}]", receivedSoFar, expectedMessageCount,
+                            m.getProperties().getMessageId());
                 });
 
+    }
+    protected void log(Delivery m) {
+        long receivedSoFar = receivedMessageCount.get();
+        LOGGER.info("Received message {}/{} [messageId:{}]", receivedSoFar, expectedMessageCount,
+                m.getProperties().getMessageId());
     }
     protected Flux<Delivery> receiveIntegers() {
         return receiver.consumeNoAck(resourceDeclaration.queueName(), consumeOptions);
@@ -383,18 +367,22 @@ class ResilientIntegerReceiver extends IntegerReceiver {
     public void run(String ... args ) {
         resourceDeclaration.declare()
                 .thenMany(receiveAcknowledgableIntegers())
-                .doOnTerminate(countDownWhenTerminate::countDown)
-                .delayElements(Duration.ofMillis(200))
+                //.delayElements(Duration.ofMillis(200))  WATCH OUT !! THIS PROBABLY ADDS A BUFFER WHICH LEAVES ONE MESSAGE IN WHEN WE RECONNECT
                 .doOnNext(d -> {
                     d.ack();
                     receivedMessageCount.incrementAndGet();
                 })
                 .take(expectedMessageCount) // We want the stream to complete when we have received all the messages
-                .subscribe(d -> {
-                    LOGGER.info("Received message {}", new String(d.getProperties().getMessageId()));
-                }, t->LOGGER.error("Error occurred", t));
+                .doOnTerminate(countDownWhenTerminate::countDown)
+                .subscribe(this::log, handleError());
 
     }
+
+    private Consumer<Throwable> handleError() {
+        return t->LOGGER.error("Error occurred", t);
+    }
+
+
     protected Flux<AcknowledgableDelivery> receiveAcknowledgableIntegers() {
         return receiver.consumeManualAck(resourceDeclaration.queueName(), consumeOptions);
     }
@@ -458,5 +446,26 @@ class ResourceDeclaration {
     private BindingSpecification queueWithExchange
             () {
         return ResourcesSpecification.binding("integers", queueName(), queueName());
+    }
+}
+class ChaosMonkey {
+    ReactorNettyClient http;
+
+    ChaosMonkey(ReactorNettyClient http) {
+        this.http = http;
+    }
+
+    void closeConnectionAfter(Mono<Connection> connection, Duration after) {
+        connection.delaySubscription(after)
+                .flatMapMany(conn -> http.getConnections()
+                        .filter( connectionInfo -> conn.getClientProvidedName().equals(connectionInfo.getClientProperties().getConnectionName()))
+                        .map(connectionInfo -> connectionInfo.getName())
+                        .zipWith(connection.map(connection1 -> connection1.getClientProvidedName()))
+                        .flatMap(tuple ->
+                        {
+                            System.err.printf("Closing %s connection %s \n", tuple.getT2(), tuple.getT1());
+                            return http.closeConnection(tuple.getT1());
+                        })
+                ).subscribe();
     }
 }

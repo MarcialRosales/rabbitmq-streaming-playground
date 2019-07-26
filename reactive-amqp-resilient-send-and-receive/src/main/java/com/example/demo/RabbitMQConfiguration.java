@@ -2,6 +2,8 @@ package com.example.demo;
 
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.Recoverable;
+import com.rabbitmq.client.RecoveryListener;
 import com.rabbitmq.http.client.Client;
 import com.rabbitmq.http.client.ReactorNettyClient;
 import org.slf4j.Logger;
@@ -71,7 +73,7 @@ public class RabbitMQConfiguration {
         connectionFactory.setUsername(rabbitProperties.getUsername());
         connectionFactory.setPassword(rabbitProperties.getPassword());
         connectionFactory.useNio();     // is this really necessary? I think it is automatically enabled
-
+        
         return connectionFactory;
     }
     @Bean
@@ -90,7 +92,6 @@ public class RabbitMQConfiguration {
                 .doOnNext(conn -> LOGGER.info("{} Connection established with {}", name, conn))
                 .cache(); // when we create the Mono<Connection>, RabbitMQ Reactive client does not automatically cache  it hence we do it.
     }
-
 
     @Bean
     ReactorNettyClient hop(RabbitProperties properties) {
