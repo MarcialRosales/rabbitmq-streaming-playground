@@ -17,9 +17,13 @@
 package com.example.demo;
 
 import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.Delivery;
+import com.rabbitmq.http.client.ReactorNettyClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -32,7 +36,17 @@ import reactor.rabbitmq.*;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 
+/**
+ *
+ * IMPORTANT CONCEPT:
+ * send or sendWithConfirmation subscribes to a Mono<Connection> to map it to a Mono<Channel>. This last map operation
+ * creates a new channel. It is not explicitly cached. Therefore, every send invocation on a Flux of messages creates
+ * a new channel. When the flux completes, it closes the channel.
+ *
+ */
 @SpringBootApplication
 public class SpringBootSample {
 
@@ -40,8 +54,69 @@ public class SpringBootSample {
         SpringApplication.run(SpringBootSample.class, args).close();
     }
 
-    @Value("${messageCount:10}")
+    @Value("${messageCount:50}")
     int messageCount;
+
+    @Bean
+    ChaosMonkey chaosMonkey(ReactorNettyClient http) {
+        return  new ChaosMonkey(http);
+    }
+
+    @Autowired
+    ChaosMonkey chaosMonkey;
+
+    class ChaosMonkey {
+        ReactorNettyClient http;
+
+        ChaosMonkey(ReactorNettyClient http) {
+            this.http = http;
+        }
+
+        void closeConnectionAfter(Mono<Connection> connection, Duration after) {
+            connection.delaySubscription(after)
+                    .flatMapMany(conn -> http.getConnections()
+                            .filter( connectionInfo -> conn.getClientProvidedName().equals(connectionInfo.getClientProperties().getConnectionName()))
+                            .map(connectionInfo -> connectionInfo.getName())
+                            .zipWith(connection.map(connection1 -> connection1.getClientProvidedName()))
+                    .flatMap(tuple ->
+                            {
+                                System.err.printf("Closing %s connection %s \n", tuple.getT2(), tuple.getT1());
+                                return http.closeConnection(tuple.getT1());
+                            })
+                    ).subscribe();
+        }
+    }
+
+
+    @Bean
+    CommandLineRunner simulateConnectionFailureWhenUsingPublisherConfirm(Sender sender, Receiver receiver, ResourceDeclaration resourceDeclaration,
+        @Qualifier("senderConnection") Mono<Connection> senderConnection, //
+        @Qualifier("receiverConnection") Mono<Connection> receiverConnection, //
+        ReactorNettyClient http) {
+
+        return args -> {
+
+            // Simulate closing both connections
+            chaosMonkey.closeConnectionAfter(senderConnection, Duration.ofSeconds(5));
+            chaosMonkey.closeConnectionAfter(receiverConnection, Duration.ofSeconds(15));
+
+            CountDownLatch senderAndReceiverCompleted = new CountDownLatch(2);
+            ResilientIntegerSender theSender = new ResilientIntegerSender(sender, resourceDeclaration, messageCount, senderAndReceiverCompleted);
+            theSender.run();
+            IntegerReceiver theReceiver = new ResilientIntegerReceiver(receiver, resourceDeclaration, messageCount, senderAndReceiverCompleted);
+            theReceiver.run();
+
+            if (!senderAndReceiverCompleted.await(120, TimeUnit.SECONDS)) {
+                System.err.println("Did not complete successfully");
+            }else {
+                System.out.printf("Summary: %d returned, %d confirmed, %d nacked |  %d received\n", theSender.returnedMessageCount.get(),
+                        theSender.ackMessageCount.get(), theSender.nackMessageCount.get(), theReceiver.receivedMessageCount.get());
+            }
+
+
+        };
+    }
+
 
     @Bean
     ResourceDeclaration resourceDeclaration(Sender sender) {
@@ -49,25 +124,29 @@ public class SpringBootSample {
     }
     //@Bean
     CommandLineRunner integerSender(Sender sender, ResourceDeclaration resourceDeclaration) {
-        return new IntegerSender(sender, resourceDeclaration, messageCount);
+        return new IntegerSender(sender, resourceDeclaration, messageCount, null);
     }
-    //@Bean
-    CommandLineRunner resilientIntegerSender(Sender sender, ResourceDeclaration resourceDeclaration) {
-        return new ResilientIntegerSender(sender, resourceDeclaration, messageCount);
-    }
-    @Bean
-    CommandLineRunner resilientIntegerSender_SendingUnroutableMessage(Sender sender, ResourceDeclaration resourceDeclaration) {
-        return new ResilientIntegerSender_SendingUnroutableMessage(sender, resourceDeclaration, messageCount);
-    }
-
 
     //@Bean
     CommandLineRunner integerSenderUsingUnknownExchange(Sender sender, ResourceDeclaration resourceDeclaration) {
-        return new IntegerSenderUsingUnknownExchange(sender, resourceDeclaration, messageCount);
+        return new IntegerSenderUsingUnknownExchange(sender, resourceDeclaration, messageCount, null);
     }
-    @Bean
+
+    //@Bean
+    CommandLineRunner resilientIntegerSender(Sender sender, ResourceDeclaration resourceDeclaration) {
+        return new ResilientIntegerSender(sender, resourceDeclaration, messageCount, null);
+    }
+    //@Bean
+    CommandLineRunner resilientIntegerSender_SendingUnroutableMessage(Sender sender, ResourceDeclaration resourceDeclaration) {
+        return new ResilientIntegerSender_SendingUnroutableMessage(sender, resourceDeclaration, messageCount, null);
+    }
+
+
+
+
+    //@Bean
     CommandLineRunner integerReceiver(Receiver receiver, ResourceDeclaration resourceDeclaration) {
-        return new IntegerReceiver(receiver, resourceDeclaration, messageCount);
+        return new IntegerReceiver(receiver, resourceDeclaration, messageCount, null);
     }
 
 
@@ -86,13 +165,13 @@ public class SpringBootSample {
  */
 class IntegerSenderUsingUnknownExchange extends IntegerSender {
 
-    public IntegerSenderUsingUnknownExchange(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
-        super(sender, resourceDeclaration, count);
+    public IntegerSenderUsingUnknownExchange(Sender sender, ResourceDeclaration resourceDeclaration, int count,  CountDownLatch countDownWhenTerminate) {
+        super(sender, resourceDeclaration, count, countDownWhenTerminate);
     }
 
     @Override
     protected OutboundMessage toAmqpMessage(int index) {
-        if (index > 2) {
+        if ((index % 2) == 0) {
             return new OutboundMessage("unknown-exchange", resourceDeclaration.queueName(), ("Message_" + index).getBytes());
         }else {
             return super.toAmqpMessage(index);
@@ -105,30 +184,52 @@ class IntegerSenderUsingUnknownExchange extends IntegerSender {
  *
  */
 class ResilientIntegerSender extends IntegerSender {
-    public ResilientIntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
-        super(sender, resourceDeclaration, count);
+
+    public ResilientIntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count,  CountDownLatch countDownWhenTerminate) {
+        super(sender, resourceDeclaration, count, countDownWhenTerminate);
         sendOptions.trackReturned(true);
     }
     public void run(String ... args) {
-        resourceDeclaration.declare()
-                .thenMany(sendWithConfirmations(integers(count)))
-                .doOnError(System.err::println)
-                .subscribe(m->{
-                    if (m.isReturned()) {
-                        System.err.println("Message returned back  "+new String(m.getOutboundMessage().getBody()));
-                    }else {
-                        if (m.isAck()) {
-                            System.out.println("Sent successfully message " + new String(m.getOutboundMessage().getBody()));
-                        } else {
-                            System.err.println("Message nacked " + new String(m.getOutboundMessage().getBody()));
-                        }
-                    }
-                });
+        CountDownLatch deliveredAllMessages = new CountDownLatch(1);
 
-        LOGGER.info("Finished sending integers");
+        Flux<OutboundMessageResult>
+                messageDeliveryStream = resourceDeclaration
+                        .declare()
+                        .thenMany(sendWithConfirmations(integers(count)));
+
+        messageDeliveryStream
+                .doOnError(System.err::println)
+                .doOnTerminate(countDownWhenTerminate::countDown)
+                .subscribe(this::handleMessageDelivery, System.err::println, () -> {LOGGER.info("Finished sending integers"); });
+
+
+    }
+    AtomicLong returnedMessageCount = new AtomicLong();
+    AtomicLong ackMessageCount = new AtomicLong();
+    AtomicLong nackMessageCount = new AtomicLong();
+
+    private void handleMessageDelivery(OutboundMessageResult delivery) {
+        String messageId = delivery.getOutboundMessage().getProperties().getMessageId();
+        if (delivery.isReturned()) {
+            returnedMessageCount.incrementAndGet();
+            LOGGER.error("Message returned back {} ", messageId);
+        }else {
+            if (delivery.isAck()) {
+                ackMessageCount.incrementAndGet();
+                LOGGER.info("Sent successfully message {}", messageId);
+            } else {
+                nackMessageCount.incrementAndGet();
+                LOGGER.error("Message nacked {}", messageId);
+            }
+        }
     }
     protected Flux<OutboundMessageResult> sendWithConfirmations(Flux<Integer> integers) {
-        return sender.sendWithPublishConfirms(integers.map(this::toAmqpMessage), sendOptions);
+        Flux<OutboundMessage> messageStream = integers.map(this::toAmqpMessage)
+                .doOnRequest(n -> LOGGER.debug("Requesting {} messages", n))
+                .delayElements(Duration.ofMillis(250))
+                .doOnNext(m -> LOGGER.debug("Sending message {} ", m.getProperties().getMessageId()));
+
+        return sender.sendWithPublishConfirms(messageStream, sendOptions);
     }
 
 }
@@ -145,14 +246,15 @@ class ResilientIntegerSender extends IntegerSender {
  *
  */
 class ResilientIntegerSender_SendingUnroutableMessage extends ResilientIntegerSender {
-    public ResilientIntegerSender_SendingUnroutableMessage(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
-        super(sender, resourceDeclaration, count);
+    public ResilientIntegerSender_SendingUnroutableMessage(Sender sender, ResourceDeclaration resourceDeclaration, int count,  CountDownLatch countDownWhenTerminate) {
+        super(sender, resourceDeclaration, count, countDownWhenTerminate);
     }
     @Override
     protected OutboundMessage toAmqpMessage(int index) {
-        if (index > 2) {
+        if ((index % 5) > 0) {
             // amq.direct exists but there should not be any bindings
-            return new OutboundMessage("amq.direct", resourceDeclaration.queueName(), ("Message_" + index).getBytes());
+            return new OutboundMessage("amq.direct", resourceDeclaration.queueName(),
+                    withMessageId(index), withBody(index));
         }else {
             return super.toAmqpMessage(index);
         }
@@ -178,20 +280,22 @@ class IntegerSender implements CommandLineRunner {
     int count;
     static final Logger LOGGER = LoggerFactory.getLogger(IntegerSender.class);
     final SendOptions sendOptions;
+    CountDownLatch countDownWhenTerminate;
 
-    public IntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count) {
+    public IntegerSender(Sender sender, ResourceDeclaration resourceDeclaration, int count, CountDownLatch countDownWhenTerminate) {
         this.sender = sender;
         this.resourceDeclaration = resourceDeclaration;
         this.count = count;
         this.sendOptions = new SendOptions();
+        this.countDownWhenTerminate =  countDownWhenTerminate;
     }
 
     public void run(String ... args) {
         resourceDeclaration.declare()
                 .then(send(integers(count)))
                 .doOnError(System.err::println)
-                .block();
-        LOGGER.info("Finished sending integers");
+                .doOnTerminate(countDownWhenTerminate::countDown)
+                .subscribe();
     }
 
     protected Mono send(Flux<Integer> integers) {
@@ -203,9 +307,17 @@ class IntegerSender implements CommandLineRunner {
     }
 
     protected OutboundMessage toAmqpMessage(int index) {
-        return new OutboundMessage(resourceDeclaration.exchangeName(), resourceDeclaration.queueName(), ("Message_" + index).getBytes());
+
+        return new OutboundMessage(resourceDeclaration.exchangeName(), resourceDeclaration.queueName(),
+                withMessageId(index), withBody(index));
     }
 
+    protected AMQP.BasicProperties withMessageId(int index) {
+        return new AMQP.BasicProperties.Builder().messageId(String.format("%d-%d", System.nanoTime(), index)).build();
+    }
+    protected byte[] withBody(int index ) {
+        return ("Message_" + index).getBytes();
+    }
 
 //    private Mono declareResourcesUsingAutoGeneratedQueue() {
 //        return Mono.zip(
@@ -215,37 +327,105 @@ class IntegerSender implements CommandLineRunner {
 //    }
 
 }
-class IntegerReceiver implements CommandLineRunner {
-    private Receiver receiver;
-    private CountDownLatch allMessagesReceived;
-    private ResourceDeclaration resourceDeclaration;
-    private static final Logger LOGGER = LoggerFactory.getLogger(IntegerReceiver.class);
 
-    public IntegerReceiver(Receiver receiver, ResourceDeclaration resourceDeclaration, int count) {
+class IntegerReceiver implements CommandLineRunner {
+    private final Logger LOGGER = LoggerFactory.getLogger(IntegerReceiver.class);
+
+    Receiver receiver;
+    ResourceDeclaration resourceDeclaration;
+    CountDownLatch countDownWhenTerminate;
+    int expectedMessageCount;
+    ConsumeOptions consumeOptions;
+
+    public IntegerReceiver(Receiver receiver, ResourceDeclaration resourceDeclaration, int count, CountDownLatch countDownWhenTerminate) {
         this.receiver = receiver;
         this.resourceDeclaration = resourceDeclaration;
-        this.allMessagesReceived = new CountDownLatch(count);
+        this.countDownWhenTerminate = countDownWhenTerminate;
+        this.expectedMessageCount = count;
+        this.consumeOptions = new ConsumeOptions();
+
     }
 
-    public void run(String ... args ) throws InterruptedException {
+    AtomicLong receivedMessageCount = new AtomicLong();
+
+    public void run(String ... args ) {
         resourceDeclaration.declare()
                 .thenMany(receiveIntegers())
-                //.take(allMessagesReceived.getCount())  we either use the take operator or call waitForAllMessages()
+                .take(expectedMessageCount) // We want the stream to complete when we have received all the messages
+                .doOnTerminate(countDownWhenTerminate::countDown)
+                .delayElements(Duration.ofMillis(200))
                 .subscribe(m -> {
+                    receivedMessageCount.incrementAndGet();
                     LOGGER.info("Received message {}", new String(m.getBody()));
-                    allMessagesReceived.countDown();
                 });
-        waitForAllMessages();
+
     }
-    private Flux<Delivery> receiveIntegers() {
-        return receiver.consumeNoAck(resourceDeclaration.queueName());
+    protected Flux<Delivery> receiveIntegers() {
+        return receiver.consumeNoAck(resourceDeclaration.queueName(), consumeOptions);
     }
-    public void waitForAllMessages() throws InterruptedException {
-        allMessagesReceived.await(10, TimeUnit.SECONDS);
+
+
+}
+class ResilientIntegerReceiver extends IntegerReceiver {
+    private final Logger LOGGER = LoggerFactory.getLogger(ResilientIntegerReceiver.class);
+
+    public ResilientIntegerReceiver(Receiver receiver, ResourceDeclaration resourceDeclaration, int count, CountDownLatch countDownWhenTerminate) {
+        super(receiver, resourceDeclaration, count, countDownWhenTerminate);
+
+        BiConsumer<Receiver.AcknowledgmentContext, Exception> exceptionHandler =
+                new ExceptionHandlers.RetryAcknowledgmentExceptionHandler(
+                        Duration.ofSeconds(20), Duration.ofMillis(500),
+                        ExceptionHandlers.CONNECTION_RECOVERY_PREDICATE
+                );
+        consumeOptions.exceptionHandler(exceptionHandler);
+    }
+
+    public void run(String ... args ) {
+        resourceDeclaration.declare()
+                .thenMany(receiveAcknowledgableIntegers())
+                .doOnTerminate(countDownWhenTerminate::countDown)
+                .delayElements(Duration.ofMillis(200))
+                .doOnNext(d -> {
+                    d.ack();
+                    receivedMessageCount.incrementAndGet();
+                })
+                .take(expectedMessageCount) // We want the stream to complete when we have received all the messages
+                .subscribe(d -> {
+                    LOGGER.info("Received message {}", new String(d.getProperties().getMessageId()));
+                }, t->LOGGER.error("Error occurred", t));
+
+    }
+    protected Flux<AcknowledgableDelivery> receiveAcknowledgableIntegers() {
+        return receiver.consumeManualAck(resourceDeclaration.queueName(), consumeOptions);
     }
 
 }
 
+/**
+ * IMPORTANT CONCEPTS:
+ * 1) ResourceManagement channel
+ *
+ *  By default, Sender creates a dedicated channel (via Mono) for resource declaration so that it does not interfeer
+ * with publishing. This channel is cached. The Mono that provides the channel from a connection is created in the Sender
+ * constructor and cached.
+ *
+ *
+ * 2) Dedicated scheduler for resource management
+ *
+ *  Sender does also create a dedicated elastic scheduler called rabbitmq-sender-resource-creation. And it uses to
+ *  process any declaration (<code>Mono<Channel>.publishOn(resourceScheduler)</code>
+ *
+ *  For instance, the logging statement "Resources are available" prints out a thread like `[....urce-creation-4]`
+ *
+ * 3) Caching
+ *
+ *  We want both, IntegerSEnder and IntegerReceiver, to use the same ResourceDeclaration instance. More specificaly, we want
+ *  them to refer to the same Mono that declare the resources. The sender and the receiver's pipeline's start subscribing
+ *  to the ResourceDeclaration's Mono. This means that , unless we cache it, it will declare teh resource twice. As far
+ *  as RabbitMQ is concerned, this is not a problem. But it is a waste of cpu and network to do it.
+ *
+ *
+ */
 class ResourceDeclaration {
     private final Sender sender;
     private static final Logger LOGGER = LoggerFactory.getLogger(ResourceDeclaration.class);
@@ -268,9 +448,10 @@ class ResourceDeclaration {
 
     private Mono<AMQP.Queue.BindOk> declareResources() {
         return sender
-                .declareExchange(ResourcesSpecification.exchange(exchangeName()))
+                .declareExchange(ResourcesSpecification.exchange(exchangeName())).log()
                 .then(sender.declareQueue(ResourcesSpecification.queue("integers")))
                 .then(sender.bind(queueWithExchange()))
+                .log()
                 .doOnNext(bindOk -> {LOGGER.info("Resources are available");})
                 .cache(); // comment out this line to see resources are declared twice. we don't want that.
     }

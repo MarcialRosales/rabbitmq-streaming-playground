@@ -2,6 +2,8 @@ package com.example.demo;
 
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.http.client.Client;
+import com.rabbitmq.http.client.ReactorNettyClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,8 +19,30 @@ import reactor.rabbitmq.*;
 import reactor.retry.Retry;
 
 import javax.annotation.PreDestroy;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
 import java.time.Duration;
 
+/**
+ * CONSIDERATIONS:
+ *
+ * 1) nio
+ *      With the default blocking IO mode, each connection uses a thread to read from the network socket.
+ *      With the NIO mode, you can control the number of threads that read and write from/to the network socket.
+ *
+ *      Use the NIO mode if your Java process uses many connections (dozens or hundreds). You should use fewer threads
+ *      than with the default blocking mode.
+ *
+ *      More https://www.rabbitmq.com/api-guide.html#java-nio
+ *
+ * 2) MessageDelivery thread
+ *
+ *      When we use Nio, a default number of nio threads are created to attend network i/o.
+ *      All callbacks from the broker, such as Confirms and Returns, are delivered via `rabbitmq-nio` thread.
+ *      This is the reason by the "publisher" thread for the OutboundMessageResult is not the same thread that
+ *      originally generated the message (by default it is the resource declaration scheduler).
+ *
+ */
 @Configuration
 @EnableConfigurationProperties({ConnectionRetryPolicyProperties.class})
 public class RabbitMQConfiguration {
@@ -50,23 +74,28 @@ public class RabbitMQConfiguration {
 
         return connectionFactory;
     }
-    @Bean("senderConnection")
+    @Bean
     Mono<Connection> senderConnection(ConnectionFactory connectionFactory, Retry<?> retryPolicy) {
         return buildNamedConnection(connectionFactory, retryPolicy, "sender");
     }
 
-    @Bean("receiverConnection")
+    @Bean
     Mono<Connection> receiverConnection(ConnectionFactory connectionFactory, Retry<?> retryPolicy) {
         return buildNamedConnection(connectionFactory, retryPolicy, "receiver");
     }
 
     private Mono<Connection> buildNamedConnection(ConnectionFactory connectionFactory, Retry<?> retryPolicy, String name) {
-        return Mono.fromCallable(() -> connectionFactory.newConnection(name))
+        return Mono.fromCallable(() -> connectionFactory.newConnection(name)).log()
                 .retryWhen(retryPolicy)
                 .doOnNext(conn -> LOGGER.info("{} Connection established with {}", name, conn))
                 .cache(); // when we create the Mono<Connection>, RabbitMQ Reactive client does not automatically cache  it hence we do it.
     }
 
+
+    @Bean
+    ReactorNettyClient hop(RabbitProperties properties) {
+        return new ReactorNettyClient("http://localhost:15672/api/", "guest", "guest");
+    }
 
     @Bean
     Sender sender(@Qualifier("senderConnection") Mono<Connection> connectionMono) {
