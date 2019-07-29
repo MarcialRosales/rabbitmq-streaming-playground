@@ -53,14 +53,9 @@ public class RabbitMQConfiguration {
                 .cache();
     }
 
-    @Bean
-    Sender sender(Mono<Connection> connectionMono) {
-        return RabbitFlux.createSender(new SenderOptions().connectionMono(connectionMono));
-    }
 
-    @Bean
-    Receiver receiver(Mono<Connection> connectionMono) {
-        return RabbitFlux.createReceiver(new ReceiverOptions().connectionMono(connectionMono));
+    Sender sender() {
+        return RabbitFlux.createSender(new SenderOptions().connectionMono(connection));
     }
 
     @Autowired
@@ -68,6 +63,8 @@ public class RabbitMQConfiguration {
 
     @PreDestroy
     public void close() throws Exception {
+        // This is required because sender.close() does not close the connection if it is provided via a Mono
+        // only when we don't provide a Mono. Maybe it should be specified in the docs.
         connection.block().close();
     }
 
