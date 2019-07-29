@@ -1,30 +1,21 @@
 package com.pivotal.rabbitmq.importer;
 
-import lombok.AccessLevel;
-import lombok.Data;
-import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
-import reactor.rabbitmq.*;
+import reactor.rabbitmq.OutboundMessage;
+import reactor.rabbitmq.OutboundMessageResult;
+import reactor.rabbitmq.Sender;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Duration;
+import java.net.URI;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.BaseStream;
 
 @Service
 @EnableConfigurationProperties(FileSenderConfigurationProperties.class)
@@ -38,6 +29,15 @@ public class FileSender {
     RabbitMQConfiguration rabbit;
 
 
+    // Useful snippets
+/*
+    private void printOutLinesFromWeb() {
+        CountDownLatch terminated = new CountDownLatch(1);
+        MessageSource.fromWeb(properties.getUri()).index().doOnTerminate(terminated::countDown).subscribe(System.out::println);
+        terminated.await();
+    }
+*/
+
     @EventListener
     public void sendFile(ApplicationStartedEvent event) throws InterruptedException {
         LOGGER.info("FileSender using {}", properties);
@@ -48,7 +48,7 @@ public class FileSender {
         ResourceDeclaration requiredResources = new ResourceDeclaration(sender, properties);
 
         sender
-                .sendWithPublishConfirms(andCount(messagesFromFile(Paths.get(properties.filename)), readCount))
+                .sendWithPublishConfirms(andCount(messagesFromFile(properties.getUri()), readCount))
                 .delaySubscription(requiredResources.declare())
                 .doOnNext(this::count)
                 .doFinally(this::printSummary)
@@ -68,10 +68,10 @@ public class FileSender {
     }
 
 
-    AtomicLong readCount = new AtomicLong();
-    AtomicLong returnedMessageCount = new AtomicLong();
-    AtomicLong nackedMessageCount = new AtomicLong();
-    AtomicLong publishedMessageCount = new AtomicLong();
+    private AtomicLong readCount = new AtomicLong();
+    private AtomicLong returnedMessageCount = new AtomicLong();
+    private AtomicLong nackedMessageCount = new AtomicLong();
+    private AtomicLong publishedMessageCount = new AtomicLong();
 
     private void count(OutboundMessageResult result) {
         if (result.isReturned()) {
@@ -89,8 +89,8 @@ public class FileSender {
         return messages.doOnNext(l -> counter.incrementAndGet());
     }
 
-    private Flux<OutboundMessage> messagesFromFile(Path path) {
-        return FromFile.lines(path)
+    private Flux<OutboundMessage> messagesFromFile(URI uri) {
+        return MessageSource.lines(uri)
                 .filter(properties::shouldSkipLine)
                 .map(l -> new OutboundMessage(properties.exchange, properties.getRoutingKey(), l.getBytes()));
     }

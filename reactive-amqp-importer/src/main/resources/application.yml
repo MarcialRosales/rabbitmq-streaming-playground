@@ -1,7 +1,8 @@
 logging.level:
-  reactor: DEBUG
+  reactor: WARN
   com.pivotal.rabbitmq.importer: DEBUG
 
 file-sender:
   queue: my-queue
-  filename: src/main/resources/small-wordcount.txt
+  #uri: src/main/resources/small-wordcount.txt
+  uri: https://raw.githubusercontent.com/MarcialRosales/rabbitmq-streaming-playground/master/reactive-amqp-importer/src/main/resources/wordcount.txt
