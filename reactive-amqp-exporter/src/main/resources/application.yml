@@ -1,0 +1,7 @@
+logging.level:
+  reactor: WARN
+  com.pivotal.rabbitmq.importer: DEBUG
+
+queue-exporter:
+  queue: my-queue
+  filename-prefix: target/file.txt
