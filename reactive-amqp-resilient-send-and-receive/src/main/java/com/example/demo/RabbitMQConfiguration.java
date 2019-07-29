@@ -73,7 +73,7 @@ public class RabbitMQConfiguration {
         connectionFactory.setUsername(rabbitProperties.getUsername());
         connectionFactory.setPassword(rabbitProperties.getPassword());
         connectionFactory.useNio();     // is this really necessary? I think it is automatically enabled
-        
+
         return connectionFactory;
     }
     @Bean

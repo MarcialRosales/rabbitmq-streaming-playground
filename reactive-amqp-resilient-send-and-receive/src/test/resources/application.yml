@@ -1,0 +1,7 @@
+logging.level.root: INFO
+logging.level:
+  reactor.rabbitmq: DEBUG
+  com.example.demo: DEBUG
+
+
+checkpoint: DEBUG

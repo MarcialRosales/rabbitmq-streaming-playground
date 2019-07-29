@@ -1,23 +1,24 @@
 package com.example.demo;
 
-import net.bytebuddy.implementation.bytecode.Throw;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.retry.Repeat;
 import reactor.retry.Retry;
 
 import java.io.IOException;
-import java.rmi.MarshalledObject;
 import java.time.Duration;
-import java.time.temporal.TemporalUnit;
+import java.util.Random;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static java.time.Duration.ofMillis;
-
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
 
 public class SpringBootSampleTest {
 
@@ -266,6 +267,180 @@ public class SpringBootSampleTest {
                 .subscribe(System.out::println, System.err::println);
 
         Thread.sleep(250*5);
+    }
+
+
+    @Test
+    public void whenDoOnNextThrowsItCancelsStreamUpwards() throws InterruptedException {
+        Random rand = new Random(System.currentTimeMillis());
+        CountDownLatch terminated = new CountDownLatch(1);
+
+        Flux.range(1, 50)
+                .log("checkpoint.1")
+                .map(i -> i*10)
+                .doOnNext(i -> {
+                    if (rand.nextBoolean()) {
+                        System.out.printf("processing %d\n", i);
+                    }else {
+                        System.err.printf("simulating an error while processing %d\n", i);
+                        throw new RuntimeException("failed to process");
+                    }
+                })
+
+                .log("checkpoint.2")
+                .doOnError(t -> System.err.printf("doOnError caught %s", t.getMessage()))
+                .doOnTerminate(terminated::countDown)
+                .log("checkpoint.3")
+                .subscribe();
+
+        terminated.await();
+    }
+
+    /**
+     * Before you learn about error-handling operators, you must keep in mind that any error in a reactive sequence
+     * is a terminal event. Even if an error-handling operator is used, it does not allow the original sequence to
+     * continue. Rather, it converts the onError signal into the start of a new sequence (the fallback one).
+     * In other words, it replaces the terminated sequence upstream of it.
+     *
+     * @throws InterruptedException
+     */
+    @Test
+    public void whenDoOnNextThrowsItCancelsStreamUpwardsButOnErrorReturnTransformsItIntoAValueAndTerminates() throws InterruptedException {
+        Logger logger = LoggerFactory.getLogger(getClass());
+
+        Random rand = new Random(System.currentTimeMillis());
+        CountDownLatch terminated = new CountDownLatch(1);
+
+        Flux.range(1, 50)
+                .log("checkpoint.1")
+                .map(i -> i*10)
+                .doOnNext(i -> {
+                    if (rand.nextBoolean()) {
+                        logger.info("processing {}", i);
+                    }else {
+                        logger.warn("simulating an error while processing {}", i);
+                        throw new RuntimeException("failed to process");
+                    }
+                })
+                .doOnError(t -> logger.error("doOnError caught {}", t.getMessage()))
+                .onErrorReturn(-1)
+                .log("checkpoint.2")
+                .doOnTerminate(terminated::countDown)
+                .log("checkpoint.3")
+                .subscribe(v -> logger.info("Subscriber received {}", v), t -> logger.error("Subscriber received {}", t),
+                        () -> logger.info("Subscriber terminated"));
+
+
+        terminated.await();
+    }
+
+    private void throwsCheckedException() throws Exception {
+        throw new IOException("io exception occurred");
+    }
+
+    @Test
+    public void wrapCheckedExceptionAndPropagate() throws InterruptedException {
+        Logger logger = LoggerFactory.getLogger(getClass());
+
+        Random rand = new Random(System.currentTimeMillis());
+        CountDownLatch terminated = new CountDownLatch(1);
+
+        Flux.range(1, 50)
+                .log("checkpoint.1")
+                .map(i -> i*10)
+                .doOnNext(i -> {
+                    if (rand.nextBoolean()) {
+                        logger.info("processing {}", i);
+                    }else {
+                        logger.warn("simulating an error while processing {}", i);
+                        try {
+                            throwsCheckedException();
+                        } catch (Exception e) {
+                            throw Exceptions.propagate(e);
+                        }
+
+                    }
+                })
+                .doOnError(t -> logger.error("doOnError caught {}", Exceptions.unwrap(t).getMessage()))
+                .onErrorReturn(-1)
+                .log("checkpoint.2")
+                .doOnTerminate(terminated::countDown)
+                .log("checkpoint.3")
+                .subscribe(v -> logger.info("Subscriber received {}", v), t -> logger.error("Subscriber received {}", t),
+                        () -> logger.info("Subscriber terminated"));
+
+        terminated.await();
+    }
+    private void processMessage(int value) throws Exception {
+
+    }
+    private void processSafeMessage(int value)  {
+
+    }
+    @Test
+    public void ackMessages() throws InterruptedException {
+        Logger logger = LoggerFactory.getLogger(getClass());
+
+        Random rand = new Random(System.currentTimeMillis());
+        CountDownLatch terminated = new CountDownLatch(1);
+
+        Flux.range(1, 50)
+                .doOnNext(i -> {
+                    Throwable caught = rand.nextBoolean() ? new Exception() : null;
+                    try {
+                        // process the message
+                        processMessage(i);
+                    } catch(RuntimeException t) {
+                        caught = t;
+                    } catch(Exception t) {
+                        caught = t;
+                    }
+
+                    if (caught != null) {
+                        logger.error("Nacked {}", i);
+                    }else {
+                        logger.info("Acked {}", i );
+                    }
+
+
+                })
+                .doOnError(t -> logger.error("doOnError caught {}", Exceptions.unwrap(t).getMessage()))
+                .doOnTerminate(terminated::countDown)
+                .subscribe(v -> logger.info("Subscriber received {}", v), t -> logger.error("Subscriber received error {}", t.getMessage()),
+                        () -> logger.info("Subscriber terminated"));
+
+        terminated.await();
+    }
+
+    @Test
+    public void ackMessages_withSubStream() throws InterruptedException {
+        Logger logger = LoggerFactory.getLogger(getClass());
+
+        Random rand = new Random(System.currentTimeMillis());
+        CountDownLatch terminated = new CountDownLatch(1);
+
+        Flux.range(1, 50)
+                .flatMap(i ->  Mono.just(i)
+                                    .doOnNext(m -> {
+                                        processSafeMessage(m);
+                                        randomlyThrow(rand, m);
+                                    })
+                                    .doOnError(e -> logger.error("nack {} {} ", i, e.getMessage()))
+                                    .doOnSuccess(v -> logger.info("ack ", v))
+                                    .onErrorReturn(i)
+
+                )
+                .doOnTerminate(terminated::countDown)
+                .subscribe(m -> logger.info("Processed message {}", m),
+                        e -> logger.error("pipeline failed", e));
+
+        terminated.await();
+    }
+
+
+    private void randomlyThrow(Random rand, Integer m) {
+        if (rand.nextBoolean())
+            throw new RuntimeException(String.format("failed to process %d", m));
     }
 
 
