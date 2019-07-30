@@ -4,5 +4,5 @@ logging.level:
 
 file-sender:
   queue: my-queue
-  #uri: src/main/resources/small-wordcount.txt
-  uri: https://raw.githubusercontent.com/MarcialRosales/rabbitmq-streaming-playground/master/reactive-amqp-importer/src/main/resources/wordcount.txt
+  uri: src/main/resources/small-wordcount.txt
+  #uri: https://raw.githubusercontent.com/MarcialRosales/rabbitmq-streaming-playground/master/reactive-amqp-importer/src/main/resources/wordcount.txt

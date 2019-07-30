@@ -51,6 +51,7 @@ public class FileSender {
                 .sendWithPublishConfirms(andCount(messagesFromFile(properties.getUri()), readCount))
                 .delaySubscription(requiredResources.declare())
                 .doOnNext(this::count)
+                .doOnError(e -> LOGGER.error("An error occurred", e))
                 .doFinally(this::printSummary)
                 .doOnTerminate(terminated::countDown)
                 .subscribe();

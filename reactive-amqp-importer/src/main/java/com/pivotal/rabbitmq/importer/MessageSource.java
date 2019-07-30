@@ -11,15 +11,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.stream.BaseStream;
-import java.util.stream.Stream;
 
 public class MessageSource {
     private static final Logger LOGGER = LoggerFactory.getLogger(MessageSource.class);
 
     public static Flux<String> lines(URI uri) {
-        switch(Stream.of(uri.getScheme()).findAny().orElse("file")) {
+        switch(uri.getScheme() == null ? "file" : uri.getScheme()) {
             case "file":
-                return fromFile(Paths.get(uri));
+                return fromFile(Paths.get(uri.toASCIIString()));
             case "http":
             case "https":
                 return fromWeb(uri);
