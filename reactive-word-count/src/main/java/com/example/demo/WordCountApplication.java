@@ -8,10 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.web.bind.annotation.RestController;
-import reactor.core.publisher.EmitterProcessor;
-import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
-import reactor.core.publisher.Mono;
+import reactor.core.publisher.*;
 import reactor.rabbitmq.*;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
@@ -53,6 +50,13 @@ public class WordCountApplication {
 		// Declare required AMQP resources (queues, exchanges and bindings)
 		WordCountResources resources = new WordCountResources(sender);
 
+		Function<? super GroupedFlux<String, String>, Flux<Tuple2<String, LongAdder>>> emitWordCount
+				= g -> g.scan(Tuples.of(g.key(), new LongAdder()),
+				(t, w) -> {
+					t.getT2().increment();
+					return t;
+				});
+
 		// Receive lines and print out count words
 		config.createReceiver()
 				.consumeNoAck(resources.wordCountInputQueue)
@@ -60,10 +64,15 @@ public class WordCountApplication {
 				.flatMap(l -> Flux.fromArray(new String(l.getBody()).split("\\b")))
 				.filter(w -> w.matches(ALPHANUMERIC))
 				.map(String::toLowerCase)
-				.groupBy(w -> w)
-				.flatMap(g -> g.scan(Tuples.of(g.key(), new LongAdder()),
-						(t, w) -> { t.getT2().increment();return t;} ))
-				.subscribe(t -> System.out.printf("%s : %d\n", t.getT1(), t.getT2().longValue()));
+				.groupBy(words -> words)
+				.flatMap(emitWordCount)
+				.subscribe(this::printWordCounts);
+	}
+	
+	private void printWordCounts(Tuple2<String, LongAdder> wordCount) {
+		System.out.printf("%s : %d\n",
+				wordCount.getT1(),
+				wordCount.getT2().longValue()))
 	}
 
 
