@@ -52,7 +52,8 @@ public class WordCountApplication {
 		WordCountResources resources = new WordCountResources(sender);
 
 		// Receive lines, emit word counts
-		Flux<Tuple2<String, LongAdder>> wordCounts = config.createReceiver()
+		Flux<Tuple2<String, LongAdder>> wordCounts = config
+				.createReceiver()
 				.consumeNoAck(resources.wordCountInputQueue)
 				.delaySubscription(resources.declare())
 				.transform(wordCount());
@@ -62,6 +63,7 @@ public class WordCountApplication {
 				.send(wordCounts.map(wc -> resources.toWordCountQueue(wc)))
 				.subscribe();
 	}
+
 
 	private Function<Flux<Delivery>, Flux<Tuple2<String, LongAdder>>> wordCount() {
 		return f -> f.flatMap(l -> Flux.fromArray(new String(l.getBody()).split("\\b")))
@@ -76,11 +78,6 @@ public class WordCountApplication {
 					t.getT2().increment();
 					return t;
 				});
-	}
-	private void printWordCounts(Tuple2<String, LongAdder> wordCount) {
-		System.out.printf("%s : %d\n",
-				wordCount.getT1(),
-				wordCount.getT2().longValue());
 	}
 
 
