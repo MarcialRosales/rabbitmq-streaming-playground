@@ -42,8 +42,8 @@ public class QueueExporter {
         CountDownLatch terminated = new CountDownLatch(1);
 
         Receiver receiver = rabbit.receiver();
-        receiver.consumeManualAck(properties.queue, new ConsumeOptions().qos(properties.qos))
-                .transform(sendToFileInBatches(file, properties.qos, Duration.ofMillis(properties.getConsumeTimeout())))
+        receiver.consumeManualAck(properties.queue, new ConsumeOptions().qos(properties.getQos()))
+                .transform(sendToFileInBatches(file, properties.batchSize, Duration.ofMillis(properties.getConsumeTimeout())))
                 .doOnNext(this::count)
                 .doOnNext(batch -> terminateIfIdle(batch, terminated))
                 .doFinally(s -> printSummary(s, file))
