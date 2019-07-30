@@ -1,4 +1,4 @@
-package com.pivotal.rabbitmq.importer;
+package com.pivotal.rabbitmq.exporter;
 
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;

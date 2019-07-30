@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.pivotal.rabbitmq.importer;
+package com.pivotal.rabbitmq.exporter;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
