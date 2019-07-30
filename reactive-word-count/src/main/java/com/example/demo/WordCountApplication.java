@@ -1,5 +1,6 @@
 package com.example.demo;
 
+import com.rabbitmq.client.Delivery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,26 +50,30 @@ public class WordCountApplication {
 
 		// Declare required AMQP resources (queues, exchanges and bindings)
 		WordCountResources resources = new WordCountResources(sender);
-
-		Function<? super GroupedFlux<String, String>, Flux<Tuple2<String, LongAdder>>> emitWordCount
-				= g -> g.scan(Tuples.of(g.key(), new LongAdder()),
-				(t, w) -> {
-					t.getT2().increment();
-					return t;
-				});
+		
 
 		// Receive lines and print out count words
 		config.createReceiver()
 				.consumeNoAck(resources.wordCountInputQueue)
 				.delaySubscription(resources.declare())
-				.flatMap(l -> Flux.fromArray(new String(l.getBody()).split("\\b")))
+				.transform(wordCount())
+				.subscribe(this::printWordCounts);
+	}
+
+	private Function<Flux<Delivery>, Flux<Tuple2<String, LongAdder>>> wordCount() {
+		return f -> f.flatMap(l -> Flux.fromArray(new String(l.getBody()).split("\\b")))
 				.filter(w -> w.matches(ALPHANUMERIC))
 				.map(String::toLowerCase)
 				.groupBy(words -> words)
-				.flatMap(emitWordCount)
-				.subscribe(this::printWordCounts);
+				.flatMap(emitWordCount());
 	}
-	
+	private Function<? super GroupedFlux<String, String>, Flux<Tuple2<String, LongAdder>>> emitWordCount() {
+		return g -> g.scan(Tuples.of(g.key(), new LongAdder()),
+				(t, w) -> {
+					t.getT2().increment();
+					return t;
+				});
+	}
 	private void printWordCounts(Tuple2<String, LongAdder> wordCount) {
 		System.out.printf("%s : %d\n",
 				wordCount.getT1(),
