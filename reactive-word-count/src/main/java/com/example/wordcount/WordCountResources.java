@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.wordcount;
 
 import reactor.core.publisher.Mono;
 import reactor.rabbitmq.*;

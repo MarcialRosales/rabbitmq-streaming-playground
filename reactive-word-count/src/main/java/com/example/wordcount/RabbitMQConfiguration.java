@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.wordcount;
 
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,10 +15,6 @@ public class RabbitMQConfiguration {
 
     @Autowired
     com.rabbitmq.client.ConnectionFactory connectionFactory;
-
-    public ReceiverOptions receiverOptions() {
-        return withReceiverOptions(connectionFactory);
-    }
 
     @Bean
     com.rabbitmq.client.ConnectionFactory connectionFactory() {

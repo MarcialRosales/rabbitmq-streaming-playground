@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.example.wordcount;
 
 import com.rabbitmq.client.Delivery;
 import org.slf4j.Logger;
@@ -14,20 +14,8 @@ import reactor.rabbitmq.*;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Duration;
-import java.util.AbstractMap;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.stream.BaseStream;
 
 @SpringBootApplication
 @RestController
