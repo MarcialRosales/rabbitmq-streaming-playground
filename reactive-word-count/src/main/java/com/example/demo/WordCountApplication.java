@@ -50,7 +50,6 @@ public class WordCountApplication {
 
 		// Declare required AMQP resources (queues, exchanges and bindings)
 		WordCountResources resources = new WordCountResources(sender);
-		
 
 		// Receive lines and print out count words
 		config.createReceiver()
@@ -77,7 +76,7 @@ public class WordCountApplication {
 	private void printWordCounts(Tuple2<String, LongAdder> wordCount) {
 		System.out.printf("%s : %d\n",
 				wordCount.getT1(),
-				wordCount.getT2().longValue()))
+				wordCount.getT2().longValue());
 	}
 
 
