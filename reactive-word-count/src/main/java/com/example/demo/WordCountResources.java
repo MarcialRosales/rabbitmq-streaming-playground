@@ -1,10 +1,10 @@
 package com.example.demo;
 
 import reactor.core.publisher.Mono;
-import reactor.rabbitmq.ExchangeSpecification;
-import reactor.rabbitmq.QueueSpecification;
-import reactor.rabbitmq.ResourcesSpecification;
-import reactor.rabbitmq.Sender;
+import reactor.rabbitmq.*;
+import reactor.util.function.Tuple2;
+
+import java.util.concurrent.atomic.LongAdder;
 
 public class WordCountResources {
 
@@ -37,6 +37,11 @@ public class WordCountResources {
     }
     private ExchangeSpecification wordCountInputExchange() {
         return ResourcesSpecification.exchange(wordCountInputExchange).durable(true);
+    }
+
+    public OutboundMessage toWordCountQueue(Tuple2<String, LongAdder> wordCount) {
+        return new OutboundMessage("", wordCountOutputQueue,
+                String.format("%s:%d\n", wordCount.getT1(), wordCount.getT2().longValue()).getBytes());
     }
 
 }

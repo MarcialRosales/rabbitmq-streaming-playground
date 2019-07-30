@@ -51,12 +51,16 @@ public class WordCountApplication {
 		// Declare required AMQP resources (queues, exchanges and bindings)
 		WordCountResources resources = new WordCountResources(sender);
 
-		// Receive lines and print out count words
-		config.createReceiver()
+		// Receive lines, emit word counts
+		Flux<Tuple2<String, LongAdder>> wordCounts = config.createReceiver()
 				.consumeNoAck(resources.wordCountInputQueue)
 				.delaySubscription(resources.declare())
-				.transform(wordCount())
-				.subscribe(this::printWordCounts);
+				.transform(wordCount());
+				
+		// .. and send those emitted word counts
+		sender
+				.send(wordCounts.map(wc -> resources.toWordCountQueue(wc)))
+				.subscribe();
 	}
 
 	private Function<Flux<Delivery>, Flux<Tuple2<String, LongAdder>>> wordCount() {
