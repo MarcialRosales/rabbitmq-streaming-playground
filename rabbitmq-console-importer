@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+[[ -f reactive-amqp-console-importer/target/reactive-amqp-console-importer-0.0.1-SNAPSHOT.jar ]] || (cd reactive-amqp-console-importer; mvn package)
+java -jar reactive-amqp-console-importer/target/reactive-amqp-console-importer-0.0.1-SNAPSHOT.jar $@
