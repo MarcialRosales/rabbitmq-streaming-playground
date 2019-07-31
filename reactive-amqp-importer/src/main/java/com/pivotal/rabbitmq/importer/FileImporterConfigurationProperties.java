@@ -7,21 +7,21 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.net.URI;
 
-@ConfigurationProperties("file-sender")
+@ConfigurationProperties()
 @Data
-class FileSenderConfigurationProperties {
+class FileImporterConfigurationProperties {
     String queue;
-    boolean durableQueue;
+    boolean durableQueue = true;
 
     String exchange = "";
     String exchangeType = "direct";
 
-    private @Getter(AccessLevel.NONE) String routingKey;
+    @Getter(AccessLevel.NONE) String routingKey;
     public String getRoutingKey() {
         return routingKey != null ? routingKey : queue;
     }
 
-    private @Getter(AccessLevel.NONE) String uri;
+    @Getter(AccessLevel.NONE) String uri;
     public URI getUri() { return uri != null ? URI.create(uri) : null; }
 
     String skipLinesStartWith;

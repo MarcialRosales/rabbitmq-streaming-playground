@@ -18,12 +18,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
-@EnableConfigurationProperties(FileSenderConfigurationProperties.class)
-public class FileSender {
-    private static final Logger LOGGER = LoggerFactory.getLogger(FileSender.class);
+@EnableConfigurationProperties(FileImporterConfigurationProperties.class)
+public class FileImporter {
+    private static final Logger LOGGER = LoggerFactory.getLogger(FileImporter.class);
 
     @Autowired
-    private FileSenderConfigurationProperties properties;
+    private FileImporterConfigurationProperties properties;
 
     @Autowired
     RabbitMQConfiguration rabbit;
@@ -40,7 +40,7 @@ public class FileSender {
 
     @EventListener
     public void sendFile(ApplicationStartedEvent event) throws InterruptedException {
-        LOGGER.info("FileSender using {}", properties);
+        LOGGER.debug("Using the following settings \n\t{}", properties);
 
         CountDownLatch terminated = new CountDownLatch(1);
 

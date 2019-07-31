@@ -6,9 +6,9 @@ import reactor.rabbitmq.Sender;
 
 class ResourceDeclaration {
     Sender sender;
-    FileSenderConfigurationProperties properties;
+    FileImporterConfigurationProperties properties;
 
-    public ResourceDeclaration(Sender sender, FileSenderConfigurationProperties properties) {
+    public ResourceDeclaration(Sender sender, FileImporterConfigurationProperties properties) {
         this.sender = sender;
         this.properties = properties;
     }

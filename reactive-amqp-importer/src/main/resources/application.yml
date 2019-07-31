@@ -1,8 +1,11 @@
 logging.level:
   reactor: WARN
-  com.pivotal.rabbitmq.importer: DEBUG
+  com.pivotal.rabbitmq.importer: WARN
+  com.pivotal.rabbitmq.importer.FileImporter: DEBUG
+  com.pivotal.rabbitmq.importer.RabbitMQConfiguration: DEBUG
 
-file-sender:
-  queue: my-queue
-  uri: src/main/resources/small-wordcount.txt
-  #uri: https://raw.githubusercontent.com/MarcialRosales/rabbitmq-streaming-playground/master/reactive-amqp-importer/src/main/resources/wordcount.txt
+spring.main.banner-mode: "off"
+
+queue: my-queue
+uri: src/main/resources/small-wordcount.txt
+#uri: https://raw.githubusercontent.com/MarcialRosales/rabbitmq-streaming-playground/master/reactive-amqp-importer/src/main/resources/wordcount.txt
