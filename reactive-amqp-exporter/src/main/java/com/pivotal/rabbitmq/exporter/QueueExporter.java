@@ -34,9 +34,9 @@ public class QueueExporter {
 
     @EventListener
     public void exportQueue(ApplicationStartedEvent event) throws InterruptedException, IOException {
-        LOGGER.info("QueueExporter using {}", properties);
+        LOGGER.debug("Using the following settings \n\t{}", properties);
 
-        Path file = Files.createTempFile(properties.queue, null);
+        Path file = Files.createTempFile(String.format("%s-", properties.queue), null);
         LOGGER.info("Exporting messages to {}", file);
 
         CountDownLatch terminated = new CountDownLatch(1);
@@ -61,7 +61,7 @@ public class QueueExporter {
     }
 
     void printSummary(SignalType signal, Path file) {
-            LOGGER.info("Exported {} messages to {}. Completed due to {}",
+            LOGGER.info("Exported {} messages to {}  - Completed due to {}",
                     receivedMessageCount.get(),
                     file,
                     signal);

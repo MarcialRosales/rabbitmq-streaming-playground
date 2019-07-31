@@ -19,16 +19,12 @@
     <appender name="stdout" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>
-                %d{HH:mm:ss.SSS} %-5level%logger{36} - %msg%n
+                %msg%n
             </pattern>
         </encoder>
     </appender>
 
-    <logger name="reactor" level="warn"/>
-
-    <logger name="reactor.rabbitmq.samples" level="info"/>
-
-    <root level="info">
+    <root level="warn">
         <appender-ref ref="stdout"/>
     </root>
 
