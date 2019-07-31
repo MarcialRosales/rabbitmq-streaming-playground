@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+[[ -f reactive-amqp-console-exporter/target/reactive-amqp-console-exporter-0.0.1-SNAPSHOT.jar ]] || (cd reactive-amqp-console-exporter; mvn package)
+java -jar reactive-amqp-console-exporter/target/reactive-amqp-console-exporter-0.0.1-SNAPSHOT.jar $@

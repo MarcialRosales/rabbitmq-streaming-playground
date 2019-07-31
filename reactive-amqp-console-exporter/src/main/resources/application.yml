@@ -1,0 +1,9 @@
+logging.level:
+  reactor: WARN
+  com.pivotal.rabbitmq.exporter: WARN
+  com.pivotal.rabbitmq.exporter.QueueExporter: DEBUG
+  com.pivotal.rabbitmq.exporter.RabbitMQConfiguration: DEBUG
+
+spring.main.banner-mode: "off"
+
+queue: my-queue
