@@ -9,9 +9,9 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.example</groupId>
-	<artifactId>reactive-amqp-partition-producer</artifactId>
+	<artifactId>reactive-amqp-partitioning</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>reactive-amqp-partition-producer</name>
+	<name>reactive-amqp-partitioning</name>
 	<description>Basic spring boot projec to demonstrate basic send and receive functionality of Reactive AMQP</description>
 
 	<properties>

@@ -57,11 +57,14 @@ public class RabbitMQConfiguration {
 
 
     public ResourceDeclaration using(TopicsProperties topics) {
-        return new ResourceDeclaration(topics, createSender());
+        return new ResourceDeclaration(topics, this);
     }
 
     public Sender createSender() {
         return RabbitFlux.createSender(new SenderOptions().connectionMono(connection));
+    }
+    public Receiver createReceiver() {
+        return RabbitFlux.createReceiver(new ReceiverOptions().connectionMono(connection));
     }
 
 

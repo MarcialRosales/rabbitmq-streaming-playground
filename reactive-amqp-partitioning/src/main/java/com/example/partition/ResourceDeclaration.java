@@ -4,12 +4,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Configuration;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.rabbitmq.OutboundMessage;
-import reactor.rabbitmq.ResourcesSpecification;
-import reactor.rabbitmq.Sender;
+import reactor.core.scheduler.Schedulers;
+import reactor.rabbitmq.*;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -21,58 +19,61 @@ import java.util.NoSuchElementException;
 public class ResourceDeclaration {
 
     TopicsProperties topics;
-    Sender sender;
+    RabbitMQConfiguration rabbit;
 
-    public ResourceDeclaration(TopicsProperties topics, Sender sender) {
-        this.sender = sender;
+    public ResourceDeclaration(TopicsProperties topics, RabbitMQConfiguration rabbit) {
         this.topics = topics;
+        this.rabbit = rabbit;
     }
 
-    public TopicSender createTopic(String topic) {
+    public TopicStream createTopic(String topic) {
         if (topics.contains(topic)) {
-            return new TopicSender(sender, topics.get(topic));
+            return new TopicStream(topics.get(topic), rabbit.createSender(), rabbit.createReceiver());
         }else {
             throw new NoSuchElementException(topic);
         }
     }
 
-//    public Mono<?> declareTopic(String ... names) {
-//        return Flux.just(names)
-//                .filter(topics::contains)
-//                .map(topics::get)
-//                .doOnNext(topic -> log.info("Declaring topic {}", topic))
-//                .concatMap(topic -> declareTopic(topic))
-//                .then(Mono.empty());
-//    }
-}
-class TopicSender {
-    Sender sender;
-    Topic topic;
 
-    public TopicSender(Sender sender, Topic topic) {
-        this.sender = sender;
+}
+
+class TopicStream {
+    Topic topic;
+    Sender sender;
+    Receiver receiver;
+
+    public TopicStream(Topic topic, Sender sender, Receiver receiver) {
         this.topic = topic;
+        this.sender = sender;
+        this.receiver = receiver;
+    }
+
+    public Flux<com.rabbitmq.client.Delivery> receive() {
+        return declareTopic(topic)
+                .thenMany(topic.partitionQueues())
+                .flatMap(receiver::consumeAutoAck);
+    }
+    public Mono<Void> send(Flux<String> stream) {
+        return declareTopic(topic)
+                .then(sendStream(stream));
     }
     public void close() {
         sender.close();
-    }
-    public Mono<Void> send(Flux<String> stream, boolean closeWhenDone) {
-        return declareTopic(topic)
-                .then(sendStream(stream)).doOnTerminate(() -> { if (closeWhenDone) sender.close(); });
+        receiver.close();
     }
 
-    private Mono<Void> sendStream(Flux<String> stream) {
+
+    protected Mono<Void> sendStream(Flux<String> stream) {
         return sender.send(stream.map(v -> new OutboundMessage(topic.getName(), getPartitionKeyValue(v),
                 v.getBytes())));
     }
 
-    private Flux<?> declareTopic(Topic topic) {
+    protected Flux<?> declareTopic(Topic topic) {
         return declareExchange(topic)
-                .thenMany(Flux.range(1, topic.partitions))
-                .map(index -> partitionQueue(topic, index))
+                .thenMany(topic.partitionQueues())
                 .concatMap(queue -> declareQueue(queue).then(bind(topic, queue)));
     }
-    private Mono<?> declareExchange(Topic topic) {
+    protected Mono<?> declareExchange(Topic topic) {
         return sender.
                 declareExchange(ResourcesSpecification.exchange(
                         topic.getName())
@@ -80,31 +81,34 @@ class TopicSender {
                         .type("x-consistent-hash")
                         .arguments(partitionKey(topic)));
     }
-    private String getPartitionKeyValue(String v) {
+    protected String getPartitionKeyValue(String v) {
         return String.valueOf(v.hashCode());    // note: hardcoded for now
     }
-    private static Map<String, Object> partitionKey(Topic topic) {
+    protected static Map<String, Object> partitionKey(Topic topic) {
         switch(topic.partitionKey) {
             case "routingKey": return null;
             default:
                 throw new UnsupportedOperationException("not supported yet");
         }
     }
-    private static Map<String, Object> mapOf(String key, String value) {
+    protected static Map<String, Object> singleActiveConsumer() {
+        return  mapOf("x-single-active-consumer", true);
+    }
+
+
+    protected static Map<String, Object> mapOf(String key, Object value) {
         Map<String, Object> map = new HashMap<>(1);
         map.put(key, value);
         return Collections.unmodifiableMap(map);
     }
 
-    private Mono<?> declareQueue(String queue) {
+    protected Mono<?> declareQueue(String queue) {
         return sender
                 .declareQueue(
-                        ResourcesSpecification.queue(queue).durable(true));
+                        ResourcesSpecification.queue(queue).durable(true).arguments(singleActiveConsumer()));
     }
-    private String partitionQueue(Topic topic, int index) {
-        return String.format("%s%s-%d", topic.getName(), topic.getQueuePrefix(), index);
-    }
-    private Mono<?> bind(Topic topic, String queue) {
+
+    protected Mono<?> bind(Topic topic, String queue) {
         return sender.bind(ResourcesSpecification.binding(
                 topic.getName(), "1", queue));
     }
@@ -164,4 +168,14 @@ class Topic {
         this.partitionKey = key;
         return this;
     }
+    private String getPartitionQueueName(int index) {
+        return String.format("%s%s-%d", name,  queuePrefix, index);
+    }
+    public Flux<String> partitionQueues() {
+        return Flux.range(1, partitions)
+                .map(this::getPartitionQueueName);
+
+    }
+
+
 }
