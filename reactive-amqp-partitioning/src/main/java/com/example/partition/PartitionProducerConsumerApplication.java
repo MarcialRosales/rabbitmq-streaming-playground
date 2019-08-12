@@ -44,7 +44,7 @@ public class PartitionProducerConsumerApplication {
             TopicsProperties topicDefinitions = new TopicsProperties();
             topicDefinitions.declare("topic1").withPartitions(2);
 
-            TopicStream topic1 = rabbit.using(topicDefinitions).createTopic("topic1");
+            TopicStream topic1 = rabbit.using(topicDefinitions).create("topic1");
             CountDownLatch done = new CountDownLatch(1);
 
             topic1.send(integers.map(String::valueOf))
@@ -64,7 +64,7 @@ public class PartitionProducerConsumerApplication {
             TopicsProperties topicDefinitions = new TopicsProperties();
             topicDefinitions.declare("topic1").withPartitions(2);
 
-            TopicStream topic1 = rabbit.using(topicDefinitions).createTopic("topic1");
+            TopicStream topic1 = rabbit.using(topicDefinitions).create("topic1");
 
             CountDownLatch done = new CountDownLatch(1000);
             topic1.receive()
@@ -88,7 +88,7 @@ public class PartitionProducerConsumerApplication {
             TopicsProperties topicDefinitions = new TopicsProperties();
             topicDefinitions.declare("topic1").withPartitions(2);
 
-            TopicStream topic1 = rabbit.using(topicDefinitions).createTopic("topic1");
+            TopicStream topic1 = rabbit.using(topicDefinitions).create("topic1");
 
             topic1.send(integers.map(String::valueOf)).subscribe();
 

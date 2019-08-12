@@ -2,6 +2,8 @@ package com.example.partition;
 
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.http.client.Client;
+import com.rabbitmq.http.client.ReactorNettyClient;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +18,10 @@ import reactor.rabbitmq.*;
 import reactor.retry.Retry;
 
 import javax.annotation.PreDestroy;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
 import java.time.Duration;
+import java.util.NoSuchElementException;
 
 @Slf4j
 @Configuration
@@ -25,6 +30,9 @@ public class RabbitMQConfiguration {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RabbitMQConfiguration.class);
 
+
+    @Autowired
+    private RabbitProperties rabbitProperties;
 
     @Bean
     Retry retryPolicy(ConnectionRetryPolicyProperties retryProperties) {
@@ -42,7 +50,7 @@ public class RabbitMQConfiguration {
     }
 
     @Bean()
-    Mono<Connection> connection(RabbitProperties rabbitProperties, Retry retryPolicy) {
+    Mono<Connection> connection(Retry retryPolicy) {
         ConnectionFactory connectionFactory = new ConnectionFactory();
         connectionFactory.setHost(rabbitProperties.getHost());
         connectionFactory.setPort(rabbitProperties.getPort());
@@ -56,8 +64,8 @@ public class RabbitMQConfiguration {
     }
 
 
-    public ResourceDeclaration using(TopicsProperties topics) {
-        return new ResourceDeclaration(topics, this);
+    public TopicStreamBuilder using(TopicsProperties topics) {
+        return new TopicStreamBuilder(topics, this);
     }
 
     public Sender createSender() {
@@ -67,6 +75,15 @@ public class RabbitMQConfiguration {
         return RabbitFlux.createReceiver(new ReceiverOptions().connectionMono(connection));
     }
 
+
+    @Bean
+    ReactorNettyClient rabbitAdminClient() {
+        return new ReactorNettyClient(String.format("http://%s:15672/api", rabbitProperties.getHost()), rabbitProperties.getUsername(), rabbitProperties.getPassword());
+    }
+
+    public String getVirtualHost() {
+        return rabbitProperties.getVirtualHost();
+    }
 
 
     @Autowired
@@ -79,6 +96,7 @@ public class RabbitMQConfiguration {
     }
 
 }
+
 @ConfigurationProperties(prefix = "spring.rabbitmq.connection")
 class ConnectionRetryPolicyProperties {
 
